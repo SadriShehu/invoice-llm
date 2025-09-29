@@ -11,45 +11,47 @@ llm = Llama(
 )
 
 MAX_RESPONSE_TOKENS = 50
-CONTEXT_WINDOW = 4096
-MAX_INPUT_TOKENS = CONTEXT_WINDOW - MAX_RESPONSE_TOKENS
 
 app = FastAPI()
 
-def extract_text_from_pdf(file_bytes: bytes) -> str:
+def extract_pages_from_pdf(file_bytes: bytes):
+    """Return a list of page texts."""
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        text = ""
+        pages = []
         for page in pdf.pages:
             page_text = page.extract_text()
             if page_text:
-                text += page_text + "\n"
-    return text
+                pages.append(page_text)
+    return pages
 
-def chunk_text(text: str, max_input_tokens: int = MAX_INPUT_TOKENS):
-    chunk_size = max_input_tokens * 4  # approx chars per token
-    for i in range(0, len(text), chunk_size):
-        yield text[i:i + chunk_size]
-
-def is_invoice(text: str) -> str:
+def is_invoice(pages: list) -> str:
+    """Check each page individually and do majority vote."""
     results = []
-    for chunk in chunk_text(text):
-        prompt = f"Is this document an invoice? Answer 'Yes' or 'No':\n{chunk}"
+    for page_text in pages:
+        prompt = f"""
+You are a document classifier. Determine whether the following document page is an **invoice**.
+Answer strictly 'Yes' for invoices, 'No' for any other type of document (e.g., CV, resume, report, letter).
+
+Page text:
+{page_text}
+"""
         response = llm(prompt, max_tokens=MAX_RESPONSE_TOKENS)
         results.append(response['choices'][0]['text'].strip())
 
+    # Majority vote
     yes_count = sum(1 for r in results if r.lower().startswith("yes"))
     no_count = sum(1 for r in results if r.lower().startswith("no"))
-    return "Yes" if yes_count >= no_count else "No"
+    return "yes" if yes_count >= no_count else "no"
 
 @app.post("/analyze")
 async def analyze_pdf(file: UploadFile = File(...)):
     try:
         file_bytes = await file.read()
-        text = extract_text_from_pdf(file_bytes)
-        if not text.strip():
+        pages = extract_pages_from_pdf(file_bytes)
+        if not pages:
             return JSONResponse({"error": "No text extracted from PDF"}, status_code=400)
 
-        vote = is_invoice(text)
+        vote = is_invoice(pages)
         return JSONResponse({"result": vote})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

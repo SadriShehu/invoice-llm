@@ -1,0 +1,18 @@
+# Exclude models directory
+models/
+
+# Exclude other common files that shouldn't be in Docker image
+.git/
+.gitignore
+README.md
+.DS_Store
+*.log
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.venv
+env/
+venv/
